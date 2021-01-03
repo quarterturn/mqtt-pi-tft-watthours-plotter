@@ -8,8 +8,6 @@ import pygame
 from pygame.locals import *
 import time
 from time import strftime, localtime
-from datetime import datetime
-from pytz import timezone
 import string
 import pylab
 import Image
@@ -20,7 +18,7 @@ from collections import deque
 # queue to hold graph data 
 # use queue so we can push new data on from the left of the list
 # which makes it easier for new data to appear at the origin of the graph
-watthours = deque(maxlen=1440)
+watthours = deque([])
 
 # font colors
 colorWhite = (255, 255, 255)
@@ -50,7 +48,6 @@ screen = pygame.display.set_mode((480, 320))
 fig, ax = pyplot.subplots()
 fig.set_size_inches(tftXSize, tftYSize)
 fig.dpi = 160
-fig.autofmt_xdate()
 background = pygame.Surface(screen.get_size())
 background = background.convert()
 
@@ -60,27 +57,27 @@ def on_connect(mqttc, obj, flags, rc):
 
 
 def on_message(mqttc, obj, msg):
-    global watthours
+    global humidity
     tick_spacing = 1
     print(msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
-    local_t = datetime.now(timezone('America/New_York'))
-    if len(watthours) == 1440:
-        watthours.pop()
-    watthours.appendleft((int(msg.payload), local_t))
-    y, x = zip(*watthours)
     
     # clear off the last plot 
     pyplot.cla()
 
+    # update the array and scroll off old data
+    if msg.topic == "house_data/watthours":
+        watthours.appendleft(msg.payload)
+        watthours.pop()
+
     # watthours
     ax.set_title("Watthours")
     ax.set_ylabel("WH")
-    ax.set_xlabel("Time")
+    ax.set_xlabel("minutes")
     # create x-axis ticks every 60 minutes
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(60))
     ax.xaxis.grid(True)
     ax.yaxis.grid(True)
-    ax.figure.autofmt_xdate()
-    ax.plot(x, y)
+    ax.plot(watthours)
     ax.set_ylim(ymin=0)
 
     pylab.savefig('graph.png', dpi=160)
@@ -107,11 +104,17 @@ def on_log(mqttc, obj, level, string):
 # choose the font
 fontpath = pygame.font.match_font('dejavusansmono')
 
+# pre-load the queue
+for i in range(0, 359):
+    watthours.append(0)
+
 # main code
 client = mqtt.Client()
+client.on_message = on_message
 client.on_connect = on_connect
-client.message_callback_add("house_data/watthours", on_message)
+
 client.connect("192.168.0.20")
+
 client.subscribe("house_data/watthours")
 
 client.loop_forever()
